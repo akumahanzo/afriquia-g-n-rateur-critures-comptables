@@ -3,10 +3,10 @@ import pandas as pd
 from datetime import datetime
 from io import BytesIO
 
-st.title("Traitement carte Afriquia - Génération écritures comptables")
+st.title("Traitement carte Afriquia - T2S - CM")
 
 uploaded_file = st.file_uploader(
-    "Importer le fichier Excel (factures + details)",
+    "Importer fichier Excel à traiter",
     type=["xlsx"]
 )
 
@@ -30,8 +30,27 @@ if uploaded_file:
     df_factures['carte'] = df_factures['carte'].astype(str)
     df_details['carte'] = df_details['carte'].astype(str)
 
+    df_factures['date facture'] = pd.to_datetime(
+        df_factures['date facture'],
+        errors='coerce'
+    )
+
+    cartes_factures = set(df_factures['carte'].unique())
+    cartes_details = set(df_details['carte'].unique())
+
+    cartes_manquantes = cartes_factures - cartes_details
+
+    df_nouvelles_cartes = pd.DataFrame({
+        'carte': list(cartes_manquantes),
+        'salarie': [''] * len(cartes_manquantes),
+        'modalite': [''] * len(cartes_manquantes),
+        'code affaire': [''] * len(cartes_manquantes)
+    })
+
+    df_factures_joint = df_factures[df_factures['carte'].isin(cartes_details)]
+
     df_merge = pd.merge(
-        df_factures,
+        df_factures_joint,
         df_details,
         on='carte',
         how='left'
@@ -50,12 +69,12 @@ if uploaded_file:
         ['carte', 'salarie', 'modalite', 'code affaire', 'type_produit']
     )['montant transaction ttc'].sum().reset_index()
 
-    lignes = []
+    lignes_charge = []
+
+    total_fournisseur = df_grouped['montant transaction ttc'].sum()
 
     mois_precedent = datetime.now().replace(day=1) - pd.Timedelta(days=1)
     date_compta = mois_precedent.date()
-
-    total = df_grouped['montant transaction ttc'].sum()
 
     for carte in df_grouped['carte'].unique():
 
@@ -67,54 +86,97 @@ if uploaded_file:
 
             r = peage.iloc[0]
 
-            lignes.append({
-                "Type compte": "Compte général",
-                "N° compte": "614310000",
-                "Description": f"Afriquia Carte {carte} - PEAGE",
-                "MODALITÉ Code": r["modalite"],
-                "Salarie Code": r["salarie"],
-                "Affaire Code": r["code affaire"],
-                "Montant débit": r["montant transaction ttc"],
-                "Montant crédit": 0
+            lignes_charge.append({
+                'Nom de la feuille': '',
+                'Date comptabilisation': date_compta,
+                'Date TVA': date_compta,
+                'Type compte': 'Compte général',
+                'N° compte': '614310000',
+                'N° document': '',
+                'Description': f"Afriquia Carte {carte} - PÉAGE",
+                'MODALITÉ Code': r['modalite'],
+                'Salarie Code': r['salarie'],
+                'Affaire Code': r['code affaire'],
+                'Division Code': '',
+                'Montant débit': r['montant transaction ttc'],
+                'Montant crédit': 0,
+                'Montant': r['montant transaction ttc']
             })
 
         gazoil = df_carte[df_carte['type_produit'] == 'gazoil']
 
         if not gazoil.empty:
 
+            montant = gazoil['montant transaction ttc'].sum()
+
             r = gazoil.iloc[0]
 
-            lignes.append({
-                "Type compte": "Compte général",
-                "N° compte": "612515000",
-                "Description": f"Afriquia Carte {carte} - GAZOIL",
-                "MODALITÉ Code": r["modalite"],
-                "Salarie Code": r["salarie"],
-                "Affaire Code": r["code affaire"],
-                "Montant débit": r["montant transaction ttc"],
-                "Montant crédit": 0
+            lignes_charge.append({
+                'Nom de la feuille': '',
+                'Date comptabilisation': date_compta,
+                'Date TVA': date_compta,
+                'Type compte': 'Compte général',
+                'N° compte': '612515000',
+                'N° document': '',
+                'Description': f"Afriquia Carte {carte} - GAZOIL",
+                'MODALITÉ Code': r['modalite'],
+                'Salarie Code': r['salarie'],
+                'Affaire Code': r['code affaire'],
+                'Division Code': '',
+                'Montant débit': montant,
+                'Montant crédit': 0,
+                'Montant': montant
             })
 
-    lignes.append({
-        "Type compte": "Fournisseur",
-        "N° compte": "F2A021",
-        "Description": "Fournisseur Afriquia",
-        "Montant débit": 0,
-        "Montant crédit": total
+    lignes_charge.append({
+        'Nom de la feuille': '',
+        'Date comptabilisation': date_compta,
+        'Date TVA': date_compta,
+        'Type compte': 'Fournisseur',
+        'N° compte': 'F2A021',
+        'N° document': '',
+        'Description': "Fournisseur Afriquia",
+        'MODALITÉ Code': '',
+        'Salarie Code': '',
+        'Affaire Code': '',
+        'Division Code': 'MULTIDIVISION',
+        'Montant débit': 0,
+        'Montant crédit': total_fournisseur,
+        'Montant': -total_fournisseur
     })
 
-    df_final = pd.DataFrame(lignes)
+    df_final = pd.DataFrame(lignes_charge)
 
-    st.subheader("Aperçu des écritures")
-    st.dataframe(df_final)
+    colonnes_restantes = [
+        'Groupe compta. produit TVA','Code devise','N° doc. externe','Type document',
+        'Groupe de comptabilisation','Groupe compta. marché TVA',"Date d'échéance",
+        'Trans. tripartite UE','Type compta. TVA','Groupe compta. marché',
+        'Groupe compta. produit','Prorata de déduction','Différence prorata TVA',
+        'N° compte TVA Correctif','Payment Method','% prorata de déduction',
+        'Montant DS','Type compte, contrepartie','Nom du compte',
+        'N° compte contrepartie','Type compta. contrepartie',
+        'Groupe compta. marché contr.','Groupe compta. produit contr.',
+        'Code échelonnement','Correction','Commentaire','Lettre Sage',
+        'Advance','Nature Code','Recouvreur Code','Commercial Code',
+        'Type client Code','NumberOfJournalRecords','Débit total',
+        'Crédit total','Solde','Solde final'
+    ]
+
+    for col in colonnes_restantes:
+        if col not in df_final.columns:
+            df_final[col] = ''
 
     buffer = BytesIO()
 
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df_final.to_excel(writer, index=False, sheet_name="ecritures comptables")
+        df_final.to_excel(writer, index=False, sheet_name="écritures comptables")
+        df_nouvelles_cartes.to_excel(writer, index=False, sheet_name="nouvelles cartes")
+
+    st.subheader("Aperçu écritures comptables")
+    st.dataframe(df_final)
 
     st.download_button(
-        label="Télécharger fichier écritures comptables",
-        data=buffer.getvalue(),
-        file_name="ecritures_comptables_afriquia.xlsx"
+        "Télécharger fichier Excel",
+        buffer.getvalue(),
+        "ecritures_comptables_afriquia.xlsx"
     )
